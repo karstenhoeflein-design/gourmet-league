@@ -21,15 +21,27 @@ export default async function handler(req, res) {
 
       // Normalize: strip apostrophes, collapse spaces
       const clean = (q || "").replace(/[''`´]/g, "").replace(/\s+/g, " ").trim();
-      const params = { limit: "50", countrycodes: "de" };
-      if (req.query.viewbox) { params.viewbox = req.query.viewbox; params.bounded = "0"; }
+      const compact = clean.replace(/\s+/g, "");
+      const base = { limit: "50", countrycodes: "de" };
+      const vb = req.query.viewbox;
 
-      let data = await nominatim({ q: clean, ...params });
+      async function tryQuery(q2, bounded) {
+        const p = { ...base, q: q2 };
+        if (vb) { p.viewbox = vb; p.bounded = bounded; }
+        return nominatim(p);
+      }
 
-      // Fallback: collapse spaces (mc donalds → mcdonalds)
-      if (!hasFood(data) && clean.includes(" ")) {
-        const compact = clean.replace(/\s+/g, "");
-        const data2 = await nominatim({ q: compact, ...params });
+      // 1) Local bounded search (only within user's area) — finds chains near the user
+      if (vb) {
+        let local = await tryQuery(clean, "1");
+        if (!hasFood(local) && clean !== compact) local = await tryQuery(compact, "1");
+        if (hasFood(local)) return res.status(200).json(local);
+      }
+
+      // 2) Biased but unrestricted (user area preferred, whole Germany allowed)
+      let data = await tryQuery(clean, "0");
+      if (!hasFood(data) && clean !== compact) {
+        const data2 = await tryQuery(compact, "0");
         if (hasFood(data2)) data = data2;
       }
 
