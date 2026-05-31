@@ -16,9 +16,23 @@ export default async function handler(req, res) {
 
   try {
     if (type === "search") {
-      const params = { q, limit: "50", countrycodes: "de" };
+      const FOOD = ["restaurant","fast_food","cafe","bar","pub","food_court","ice_cream","biergarten"];
+      const hasFood = data => data.some(r => r.class === "amenity" && FOOD.includes(r.type));
+
+      // Normalize: strip apostrophes, collapse spaces
+      const clean = (q || "").replace(/[''`´]/g, "").replace(/\s+/g, " ").trim();
+      const params = { limit: "50", countrycodes: "de" };
       if (req.query.viewbox) { params.viewbox = req.query.viewbox; params.bounded = "0"; }
-      const data = await nominatim(params);
+
+      let data = await nominatim({ q: clean, ...params });
+
+      // Fallback: collapse spaces (mc donalds → mcdonalds)
+      if (!hasFood(data) && clean.includes(" ")) {
+        const compact = clean.replace(/\s+/g, "");
+        const data2 = await nominatim({ q: compact, ...params });
+        if (hasFood(data2)) data = data2;
+      }
+
       return res.status(200).json(data);
     }
 
