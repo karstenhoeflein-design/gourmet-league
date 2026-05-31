@@ -136,9 +136,15 @@ async function fetchPlaces(type, params) {
   if (!res.ok) throw new Error("API " + res.status);
   return res.json();
 }
-async function searchRestaurantsAI(q) {
+async function searchRestaurantsAI(q, userPos) {
   const qt = q.trim();
-  const nomData = await fetchPlaces("search", { q: qt });
+  const params = { q: qt };
+  if (userPos) {
+    const [lat, lon] = userPos;
+    const d = 0.4;
+    params.viewbox = `${lon - d},${lat - d},${lon + d},${lat + d}`;
+  }
+  const nomData = await fetchPlaces("search", params);
 
   // Direct restaurant hits
   const hits = nomData.filter(r => r.class === "amenity" && r.type === "restaurant");
@@ -450,7 +456,7 @@ function EntdeckenTab({ myVisits }) {
     if (!query.trim()) return;
     setSearching(true); setSearchResults(null); setSearchErr(null); setSelectedId(null);
     try {
-      const res = await searchRestaurantsAI(query);
+      const res = await searchRestaurantsAI(query, userPos);
       setSearchResults(res); setView("list");
     } catch(err) {
       setSearchErr("Fehler: " + (err.message || "Verbindungsproblem"));

@@ -16,7 +16,9 @@ export default async function handler(req, res) {
 
   try {
     if (type === "search") {
-      const data = await nominatim({ q, limit: "20", countrycodes: "de" });
+      const params = { q, limit: "50", countrycodes: "de" };
+      if (req.query.viewbox) { params.viewbox = req.query.viewbox; params.bounded = "0"; }
+      const data = await nominatim(params);
       return res.status(200).json(data);
     }
 
