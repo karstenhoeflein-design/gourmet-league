@@ -1,23 +1,13 @@
 export const config = { maxDuration: 30 };
 
-const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-];
+const NOM = "https://nominatim.openstreetmap.org";
+const HEADERS = { "User-Agent": "GourmetLeague/1.0 (gourmet-league-v2.vercel.app)" };
 
-async function queryOverpass(oql) {
-  const body = "data=" + encodeURIComponent(oql);
-  for (const url of OVERPASS_ENDPOINTS) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      const r = await fetch(url, { method: "POST", body, signal: controller.signal });
-      clearTimeout(timer);
-      if (r.ok) return await r.json();
-    } catch {}
-  }
-  return null;
+async function nominatim(params) {
+  const url = NOM + "/search?" + new URLSearchParams({ format: "json", addressdetails: "1", ...params });
+  const r = await fetch(url, { headers: HEADERS });
+  if (!r.ok) throw new Error("Nominatim " + r.status);
+  return r.json();
 }
 
 export default async function handler(req, res) {
@@ -26,18 +16,15 @@ export default async function handler(req, res) {
 
   try {
     if (type === "search") {
-      const url = "https://nominatim.openstreetmap.org/search?" + new URLSearchParams({
-        q, format: "json", limit: "20", countrycodes: "de", addressdetails: "1",
-      });
-      const r = await fetch(url, { headers: { "User-Agent": "GourmetLeague/1.0 (gourmet-league-v2.vercel.app)" } });
-      if (!r.ok) return res.status(r.status).json({ error: "Nominatim error" });
-      return res.status(200).json(await r.json());
+      const data = await nominatim({ q, limit: "20", countrycodes: "de" });
+      return res.status(200).json(data);
     }
 
     if (type === "nearby") {
-      const oql = `[out:json][timeout:8];node["amenity"="restaurant"](around:2000,${parseFloat(lat)},${parseFloat(lon)});out tags 25;`;
-      const data = await queryOverpass(oql);
-      if (!data) return res.status(503).json({ elements: [] });
+      const la = parseFloat(lat), lo = parseFloat(lon);
+      const d = 0.022; // ~2.5 km
+      const viewbox = `${lo - d},${la - d},${lo + d},${la + d}`;
+      const data = await nominatim({ amenity: "restaurant", viewbox, bounded: "1", limit: "30" });
       return res.status(200).json(data);
     }
 

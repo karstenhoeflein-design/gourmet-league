@@ -114,77 +114,50 @@ function normalizeRestaurants(arr) {
     lat: Number(r.lat), lng: Number(r.lng),
   })).filter(r => r.lat && r.lng && !isNaN(r.lat) && !isNaN(r.lng));
 }
-function osmElementToRestaurant(el) {
-  const tags = el.tags || {};
+function nominatimToRestaurant(r) {
   return {
-    id: "osm-" + el.id,
-    name: tags.name || el.display_name?.split(",")[0] || "Unbekannt",
-    city: tags["addr:city"] || tags["addr:suburb"] || "",
-    street: tags["addr:street"] ? tags["addr:street"] + (tags["addr:housenumber"] ? " " + tags["addr:housenumber"] : "") : "",
-    cuisine: tags.cuisine ? tags.cuisine.replace(/_/g, " ") : "",
-    openingHours: tags.opening_hours || "",
-    website: tags.website || "",
-    lat: el.lat || el.centre?.lat,
-    lng: el.lon || el.centre?.lon,
+    id: "nom-" + r.place_id,
+    name: r.address?.amenity || r.display_name.split(",")[0],
+    city: r.address?.city || r.address?.town || r.address?.village || r.address?.suburb || "",
+    street: r.address?.road ? r.address.road + (r.address?.house_number ? " " + r.address.house_number : "") : "",
+    cuisine: "",
+    openingHours: "",
+    website: "",
+    lat: parseFloat(r.lat),
+    lng: parseFloat(r.lon),
     globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
     globalCount: Math.floor(50 + Math.random() * 800),
-    priceRange: ["€","€€","€€€"][Math.floor(Math.random() * 3)],
+    priceRange: "€€",
   };
+}
+async function fetchPlaces(type, params) {
+  const url = "/api/places?" + new URLSearchParams({ type, ...params });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("API " + res.status);
+  return res.json();
 }
 async function searchRestaurantsAI(q) {
   const qt = q.trim();
+  const nomData = await fetchPlaces("search", { q: qt });
 
-  // Step 1: Nominatim via our own API route (avoids browser CORS issues)
-  const nomRes = await fetch("/api/places?type=search&q=" + encodeURIComponent(qt));
-  if (!nomRes.ok) throw new Error("Suche nicht erreichbar (" + nomRes.status + ")");
-  const nomData = await nomRes.json();
+  // Direct restaurant hits
+  const hits = nomData.filter(r => r.class === "amenity" && r.type === "restaurant");
+  if (hits.length > 0) return normalizeRestaurants(hits.map(nominatimToRestaurant));
 
-  // Direct restaurant hits from Nominatim
-  const directHits = nomData.filter(r => r.class === "amenity" && r.type === "restaurant");
-  if (directHits.length > 0) {
-    return normalizeRestaurants(directHits.map(r => ({
-      id: "nom-" + r.place_id,
-      name: r.namedetails?.name || r.display_name.split(",")[0],
-      city: r.address?.city || r.address?.town || r.address?.village || r.address?.suburb || "",
-      street: r.address?.road ? r.address.road + (r.address?.house_number ? " " + r.address.house_number : "") : "",
-      cuisine: "",
-      openingHours: "",
-      website: "",
-      lat: parseFloat(r.lat),
-      lng: parseFloat(r.lon),
-      globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
-      globalCount: Math.floor(50 + Math.random() * 800),
-      priceRange: "€€",
-    })));
-  }
-
-  // Step 2: Treat query as a location — geocode and find restaurants nearby via Overpass
+  // Geocode the query, then find nearby restaurants
   if (!nomData.length) throw new Error("Nichts gefunden. Tipp: Restaurantname oder Stadt eingeben.");
   const { lat, lon } = nomData[0];
 
-  const ovRes = await fetch("/api/places?type=nearby&lat=" + lat + "&lon=" + lon);
-  const ovData = ovRes.ok ? await ovRes.json() : { elements: [] };
-  const results = (ovData.elements || []).filter(el => el.tags?.name).map(osmElementToRestaurant);
-  if (!results.length) throw new Error("Keine Restaurants gefunden. Versuche eine andere Stadt oder einen Restaurantnamen.");
-  return normalizeRestaurants(results);
+  const nearby = await fetchPlaces("nearby", { lat, lon });
+  const restaurants = nearby.filter(r => r.class === "amenity" && r.type === "restaurant");
+  if (!restaurants.length) throw new Error("Keine Restaurants gefunden. Versuche eine andere Stadt.");
+  return normalizeRestaurants(restaurants.map(nominatimToRestaurant));
 }
 async function fetchNearbyRestaurants(lat, lng) {
   try {
-    const res = await fetch("/api/places?type=nearby&lat=" + lat + "&lon=" + lng);
-    if (!res.ok) throw new Error("status " + res.status);
-    const data = await res.json();
-    const results = (data.elements || []).filter(el => el.tags && el.tags.name).map(el => ({
-      id: "osm-" + el.id, name: el.tags.name, city: el.tags["addr:city"] || el.tags["addr:suburb"] || "",
-      street: el.tags["addr:street"] ? el.tags["addr:street"] + (el.tags["addr:housenumber"] ? " " + el.tags["addr:housenumber"] : "") : "",
-      cuisine: el.tags.cuisine ? el.tags.cuisine.replace(/_/g, " ") : "",
-      openingHours: el.tags.opening_hours || "", website: el.tags.website || "",
-      lat: el.lat, lng: el.lon,
-      globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
-      globalCount: Math.floor(50 + Math.random() * 800),
-      priceRange: ["€", "€€", "€€€"][Math.floor(Math.random() * 3)],
-    }));
-    if (results.length > 0) return results;
-    throw new Error("empty");
+    const data = await fetchPlaces("nearby", { lat, lon: lng });
+    const results = data.filter(r => r.class === "amenity" && r.type === "restaurant").map(nominatimToRestaurant);
+    return results.length ? results : [];
   } catch {
     return [];
   }
@@ -442,27 +415,11 @@ function EntdeckenTab({ myVisits }) {
   const myKeys = new Set(myVisits.map(v => (v.name + "||" + v.city).toLowerCase()));
   const displayed = searchResults || nearby;
 
-  // Only use Overpass for nearby — no Claude API fallback to avoid rate limits
   async function loadNearbyOverpass(lat, lng) {
     setNearbyLoading(true);
     try {
-      const q = "[out:json][timeout:12];node[\"amenity\"=\"restaurant\"](around:1200," + lat + "," + lng + ");out tags 30;";
-      const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST", body: "data=" + encodeURIComponent(q),
-      });
-      if (!res.ok) throw new Error("Overpass " + res.status);
-      const data = await res.json();
-      const results = (data.elements || []).filter(el => el.tags && el.tags.name).map(el => ({
-        id: "osm-" + el.id, name: el.tags.name,
-        city: el.tags["addr:city"] || el.tags["addr:suburb"] || "",
-        street: el.tags["addr:street"] ? el.tags["addr:street"] + (el.tags["addr:housenumber"] ? " " + el.tags["addr:housenumber"] : "") : "",
-        cuisine: el.tags.cuisine ? el.tags.cuisine.replace(/_/g, " ") : "",
-        openingHours: el.tags.opening_hours || "", website: el.tags.website || "",
-        lat: el.lat, lng: el.lon,
-        globalAvg: parseFloat((3.5 + Math.random() * 1.4).toFixed(1)),
-        globalCount: Math.floor(50 + Math.random() * 800),
-        priceRange: ["€","€€","€€€"][Math.floor(Math.random() * 3)],
-      }));
+      const data = await fetchPlaces("nearby", { lat, lon: lng });
+      const results = data.filter(r => r.class === "amenity" && r.type === "restaurant").map(nominatimToRestaurant);
       setNearby(results.slice(0, 25));
     } catch {
       // Overpass blocked or failed — show empty, user can search manually
