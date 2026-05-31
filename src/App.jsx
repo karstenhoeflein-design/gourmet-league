@@ -70,35 +70,58 @@ async function hashPw(pw) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-// localStorage-based persistence — reliable in Claude artifacts
+// localStorage — session cache / offline fallback
 const LS = {
   get(key) { try { return localStorage.getItem("gl:" + key); } catch { return null; } },
   set(key, val) { try { localStorage.setItem("gl:" + key, val); return true; } catch { return false; } },
   del(key) { try { localStorage.removeItem("gl:" + key); } catch {} },
-  keys(prefix) {
-    try {
-      const out = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith("gl:" + prefix)) out.push(k.slice(3)); // strip "gl:"
-      }
-      return out;
-    } catch { return []; }
-  }
 };
 
-async function saveEmailIndex(email, uid) { LS.set("email:" + email.toLowerCase().trim(), uid); }
-async function lookupEmail(email) { return LS.get("email:" + email.toLowerCase().trim()); }
+// ─── KV SYNC (cloud storage for cross-device) ─────────────────────────────────
+async function kvGet(key) {
+  try {
+    const r = await fetch("/api/kv?key=" + encodeURIComponent(key));
+    if (!r.ok) return null;
+    const { result } = await r.json();
+    return result ?? null;
+  } catch { return null; }
+}
+async function kvSet(key, value) {
+  try {
+    await fetch("/api/kv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value }),
+    });
+  } catch {}
+}
+
+async function saveEmailIndex(email, uid) {
+  const k = "email:" + email.toLowerCase().trim();
+  LS.set(k, uid);
+  await kvSet(k, uid);
+}
+async function lookupEmail(email) {
+  const k = "email:" + email.toLowerCase().trim();
+  const remote = await kvGet(k);
+  if (remote) return remote;
+  return LS.get(k);
+}
 async function saveUser(user) {
-  const ok = LS.set("user:" + user.id, JSON.stringify(user));
-  if (!ok) throw new Error("localStorage nicht verfügbar");
+  LS.set("user:" + user.id, JSON.stringify(user));
+  await kvSet("user:" + user.id, user);
+  await kvSet("code:" + user.inviteCode, user.id);
 }
 async function loadUser(uid) {
-  const v = LS.get("user:" + uid);
-  return v ? JSON.parse(v) : null;
+  const remote = await kvGet("user:" + uid);
+  if (remote) { LS.set("user:" + uid, JSON.stringify(remote)); return remote; }
+  const cached = LS.get("user:" + uid);
+  return cached ? JSON.parse(cached) : null;
 }
-async function listAllUsers() {
-  return LS.keys("user:").map(k => { try { const v = LS.get(k); return v ? JSON.parse(v) : null; } catch { return null; } }).filter(Boolean);
+async function lookupByInviteCode(code) {
+  const uid = await kvGet("code:" + code.toUpperCase());
+  if (uid) return loadUser(uid);
+  return null;
 }
 const AVATARS = ["🧑","👩","👨","👩‍🦱","🧔","👱","👩‍🦰","🧑‍🍳","👩‍🍳","🕵️","🧑‍🎤","👸"];
 
@@ -1370,9 +1393,8 @@ function ProfileTab({ user, onUpdate, onLogout }) {
     const code = searchCode.trim().toUpperCase();
     if (code.length < 4) return;
     setSearchingCode(true); setCodeResult(null); setReqMsg("");
-    const allUsers = listAllUsers(); // sync via LS
-    const found = allUsers.find(u => u.inviteCode === code && u.id !== user.id);
-    setCodeResult(found || "notfound");
+    const found = await lookupByInviteCode(code);
+    setCodeResult(found && found.id !== user.id ? found : "notfound");
     setSearchingCode(false);
   }
 
