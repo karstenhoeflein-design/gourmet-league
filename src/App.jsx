@@ -115,18 +115,14 @@ function normalizeRestaurants(arr) {
   })).filter(r => r.lat && r.lng && !isNaN(r.lat) && !isNaN(r.lng));
 }
 async function searchRestaurantsAI(q) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/api/search", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514", max_tokens: 2000,
-      system: "You are a restaurant database. Always respond with only a valid JSON array. No explanations, no markdown, no code fences. Start your response with [ and end with ].",
-      messages: [{ role: "user", content: "Return 5 real restaurant locations for \"" + q + "\" in Germany as a JSON array. Each object must have: id (string), name (string), city (string), street (string), cuisine (string), priceRange (string, euro signs), globalAvg (number 3.0-5.0), globalCount (number), openingHours (string), website (string), lat (number, real WGS84), lng (number, real WGS84). Use only real locations with accurate coordinates." }]
-    })
+    body: JSON.stringify({ query: q, type: "search" }),
   });
   if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error("HTTP " + res.status + (t ? ": " + t.slice(0, 80) : "")); }
   const data = await res.json();
-  if (data.type === "error") throw new Error(data.error?.message || "API error");
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
+  if (data.error) throw new Error(data.error);
+  const text = (data.text || "").trim();
   const clean = text.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
   const s = clean.indexOf("["), e = clean.lastIndexOf("]");
   if (s !== -1 && e !== -1) { try { const p = JSON.parse(clean.slice(s, e + 1)); if (Array.isArray(p)) return normalizeRestaurants(p); } catch {} }
@@ -153,22 +149,20 @@ async function fetchNearbyRestaurants(lat, lng) {
     if (results.length > 0) return results;
     throw new Error("empty");
   } catch {
-    const res2 = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514", max_tokens: 2000,
-        system: "You are a restaurant database. Always respond with only a valid JSON array. No explanations, no markdown, no code fences.",
-        messages: [{ role: "user", content: "Return 8 real restaurants near coordinates " + lat.toFixed(4) + "," + lng.toFixed(4) + " in Germany (within 1km). JSON array with fields: id, name, city, street, cuisine, priceRange, globalAvg, globalCount, openingHours, website, lat, lng. Use real WGS84 coordinates." }]
-      })
-    });
-    if (!res2.ok) return [];
-    const data2 = await res2.json();
-    if (data2.type === "error") return [];
-    const text2 = (data2.content || []).filter(b => b.type === "text").map(b => b.text).join("").trim();
-    const clean2 = text2.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
-    const s2 = clean2.indexOf("["), e2 = clean2.lastIndexOf("]");
-    if (s2 === -1 || e2 === -1) return [];
-    try { const p = JSON.parse(clean2.slice(s2, e2 + 1)); return Array.isArray(p) ? normalizeRestaurants(p) : []; } catch { return []; }
+    try {
+      const res2 = await fetch("/api/search", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: lat.toFixed(4) + "," + lng.toFixed(4), type: "nearby" }),
+      });
+      if (!res2.ok) return [];
+      const data2 = await res2.json();
+      if (data2.error) return [];
+      const text2 = (data2.text || "").trim();
+      const clean2 = text2.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim();
+      const s2 = clean2.indexOf("["), e2 = clean2.lastIndexOf("]");
+      if (s2 === -1 || e2 === -1) return [];
+      try { const p = JSON.parse(clean2.slice(s2, e2 + 1)); return Array.isArray(p) ? normalizeRestaurants(p) : []; } catch { return []; }
+    } catch { return []; }
   }
 }
 
