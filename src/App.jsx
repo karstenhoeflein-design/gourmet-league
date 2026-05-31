@@ -146,23 +146,25 @@ async function searchRestaurantsAI(q, userPos) {
   }
   const nomData = await fetchPlaces("search", params);
 
-  // Direct restaurant hits
-  const hits = nomData.filter(r => r.class === "amenity" && r.type === "restaurant");
+  const FOOD = new Set(["restaurant", "fast_food", "cafe", "bar", "pub", "food_court", "ice_cream", "biergarten"]);
+
+  // Direct food place hits (restaurant, fast_food, cafe, …)
+  const hits = nomData.filter(r => r.class === "amenity" && FOOD.has(r.type));
   if (hits.length > 0) return normalizeRestaurants(hits.map(nominatimToRestaurant));
 
-  // Geocode the query, then find nearby restaurants
+  // Geocode the query, then find nearby food places
   if (!nomData.length) throw new Error("Nichts gefunden. Tipp: Restaurantname oder Stadt eingeben.");
   const { lat, lon } = nomData[0];
 
   const nearby = await fetchPlaces("nearby", { lat, lon });
-  const restaurants = nearby.filter(r => r.class === "amenity" && r.type === "restaurant");
+  const restaurants = nearby.filter(r => r.class === "amenity" && FOOD.has(r.type));
   if (!restaurants.length) throw new Error("Keine Restaurants gefunden. Versuche eine andere Stadt.");
   return normalizeRestaurants(restaurants.map(nominatimToRestaurant));
 }
 async function fetchNearbyRestaurants(lat, lng) {
   try {
     const data = await fetchPlaces("nearby", { lat, lon: lng });
-    const results = data.filter(r => r.class === "amenity" && r.type === "restaurant").map(nominatimToRestaurant);
+    const results = data.filter(r => r.class === "amenity" && ["restaurant","fast_food","cafe","bar","pub","food_court","ice_cream","biergarten"].includes(r.type)).map(nominatimToRestaurant);
     return results.length ? results : [];
   } catch {
     return [];
@@ -425,7 +427,7 @@ function EntdeckenTab({ myVisits }) {
     setNearbyLoading(true);
     try {
       const data = await fetchPlaces("nearby", { lat, lon: lng });
-      const results = data.filter(r => r.class === "amenity" && r.type === "restaurant").map(nominatimToRestaurant);
+      const results = data.filter(r => r.class === "amenity" && ["restaurant","fast_food","cafe","bar","pub","food_court","ice_cream","biergarten"].includes(r.type)).map(nominatimToRestaurant);
       setNearby(results.slice(0, 25));
     } catch {
       // Overpass blocked or failed — show empty, user can search manually

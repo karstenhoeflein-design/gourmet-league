@@ -24,10 +24,14 @@ export default async function handler(req, res) {
 
     if (type === "nearby") {
       const la = parseFloat(lat), lo = parseFloat(lon);
-      const d = 0.022; // ~2.5 km
+      const d = 0.022;
       const viewbox = `${lo - d},${la - d},${lo + d},${la + d}`;
-      const data = await nominatim({ amenity: "restaurant", viewbox, bounded: "1", limit: "30" });
-      return res.status(200).json(data);
+      const base = { viewbox, bounded: "1", limit: "20" };
+      const [restaurants, fastFood] = await Promise.all([
+        nominatim({ amenity: "restaurant", ...base }),
+        nominatim({ amenity: "fast_food", ...base }),
+      ]);
+      return res.status(200).json([...restaurants, ...fastFood]);
     }
 
     res.status(400).json({ error: "Invalid type" });
