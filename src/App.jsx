@@ -163,10 +163,9 @@ async function searchRestaurantsAI(q) {
   const { lat, lon } = nomData[0];
 
   const ovRes = await fetch("/api/places?type=nearby&lat=" + lat + "&lon=" + lon);
-  if (!ovRes.ok) throw new Error("Restaurants konnten nicht geladen werden");
-  const ovData = await ovRes.json();
+  const ovData = ovRes.ok ? await ovRes.json() : { elements: [] };
   const results = (ovData.elements || []).filter(el => el.tags?.name).map(osmElementToRestaurant);
-  if (!results.length) throw new Error("Keine Restaurants in diesem Bereich gefunden");
+  if (!results.length) throw new Error("Keine Restaurants gefunden. Versuche eine andere Stadt oder einen Restaurantnamen.");
   return normalizeRestaurants(results);
 }
 async function fetchNearbyRestaurants(lat, lng) {
