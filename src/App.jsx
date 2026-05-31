@@ -362,46 +362,149 @@ function TileMap({ userPos, restaurants, onSelect, selectedId }) {
 }
 
 // ─── RESTAURANT SEARCH MODAL ──────────────────────────────────────────────────
+const CUISINE_OPTIONS = ["Deutsch","Italienisch","Fast Food","Japanisch","Chinesisch","Griechisch","Türkisch","Amerikanisch","Indisch","Mexikanisch","Französisch","Mediterran","Vietnamesisch","Sonstiges"];
+
 function RestaurantSearchModal({ onSelect, onClose }) {
-  const [q, setQ] = useState(""); const [results, setResults] = useState([]); const [loading, setLoading] = useState(false); const [msg, setMsg] = useState("");
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [noResults, setNoResults] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [manual, setManual] = useState({ name: "", street: "", city: "", plz: "", cuisine: "" });
   const timer = useRef(null);
+
   function handleChange(e) {
     const val = e.target.value; setQ(val);
+    setNoResults(false); setShowManual(false); setResults([]);
     clearTimeout(timer.current);
-    if (val.length < 2) { setResults([]); setMsg(""); return; }
+    if (val.length < 2) { setMsg(""); return; }
     timer.current = setTimeout(async () => {
       setLoading(true); setMsg("");
-      try { const res = await searchRestaurantsAI(val); setResults(res); if (!res.length) setMsg("Keine Treffer gefunden."); }
-      catch(err) { setMsg("Fehler: " + (err.message || "Verbindungsfehler")); }
-      finally { setLoading(false); }
+      try {
+        const res = await searchRestaurantsAI(val);
+        setResults(res);
+        if (!res.length) { setMsg("Keine Treffer gefunden."); setNoResults(true); }
+      } catch(err) {
+        setMsg("Keine Treffer gefunden.");
+        setNoResults(true);
+      } finally { setLoading(false); }
     }, 800);
   }
+
+  function openManual() {
+    setShowManual(true);
+    setManual(m => ({ ...m, name: q }));
+  }
+
+  function submitManual() {
+    const { name, street, city, plz, cuisine } = manual;
+    if (!name || !street || !city || !plz || !cuisine) return;
+    onSelect({ id: "manual-" + Date.now(), name, street, city, plz, cuisine, lat: null, lng: null, globalAvg: 4.0, globalCount: 0, priceRange: "€€", openingHours: "", website: "" });
+  }
+
+  const manualOk = manual.name && manual.street && manual.city && manual.plz && manual.cuisine;
+  const fieldStyle = { width: "100%", boxSizing: "border-box", background: T.bgRaised, border: "1px solid " + T.border, borderRadius: 10, padding: "11px 14px", color: T.text, fontSize: 14, fontFamily: "DM Sans, sans-serif", outline: "none", marginBottom: 10 };
+
   return (
     <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 200, backdropFilter: "blur(8px)" }}>
-      <div style={{ background: T.bgCard, border: "1px solid " + T.border, borderRadius: "20px 20px 0 0", padding: "28px 22px 36px", width: "100%", maxWidth: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", animation: "slideUp .3s cubic-bezier(.22,1,.36,1)" }}>
+      <div style={{ background: T.bgCard, border: "1px solid " + T.border, borderRadius: "20px 20px 0 0", padding: "28px 22px 36px", width: "100%", maxWidth: 480, maxHeight: "90vh", display: "flex", flexDirection: "column", animation: "slideUp .3s cubic-bezier(.22,1,.36,1)" }}>
+
+        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div style={{ fontFamily: "Playfair Display, serif", fontSize: 20, color: T.text }}>Restaurant suchen</div>
-          <button onClick={onClose} style={{ background: T.bgRaised, border: "1px solid " + T.border, color: T.textDim, width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          <div style={{ fontFamily: "Playfair Display, serif", fontSize: 20, color: T.text }}>
+            {showManual ? "Manuell eintragen" : "Restaurant suchen"}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {showManual && <button onClick={() => setShowManual(false)} style={{ background: T.bgRaised, border: "1px solid " + T.border, color: T.textDim, padding: "0 12px", height: 32, borderRadius: 8, cursor: "pointer", fontSize: 12, fontFamily: "DM Sans, sans-serif" }}>← Suche</button>}
+            <button onClick={onClose} style={{ background: T.bgRaised, border: "1px solid " + T.border, color: T.textDim, width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
         </div>
-        <div style={{ position: "relative", marginBottom: 10 }}>
-          <input autoFocus value={q} onChange={handleChange} placeholder="Name, Küche oder Ort …" style={{ width: "100%", boxSizing: "border-box", background: T.bgRaised, border: "1px solid " + T.borderHi, borderRadius: 10, padding: "12px 44px 12px 16px", color: T.text, fontSize: 14, fontFamily: "DM Sans, sans-serif", outline: "none" }}
-            onFocus={e => { e.target.style.borderColor = T.gold; }} onBlur={e => { e.target.style.borderColor = T.borderHi; }} />
-          <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>{loading ? "⏳" : "🔍"}</span>
-        </div>
-        <div style={{ fontSize: 10, color: T.textFade, marginBottom: 12, letterSpacing: 1 }}>via Claude AI · {results.length ? results.length + " Treffer" : "min. 2 Zeichen"}</div>
-        {msg && <div style={{ fontSize: 12, color: "#e74c3c", marginBottom: 10 }}>{msg}</div>}
-        <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-          {results.map(r => (
-            <div key={r.id} onClick={() => onSelect(r)}
-              style={{ background: T.bgRaised, border: "1px solid " + T.border, borderRadius: 10, padding: "12px 16px", cursor: "pointer", transition: "all .15s" }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = T.gold; e.currentTarget.style.background = T.bgHover; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgRaised; }}>
-              <div style={{ fontSize: 14, color: T.text, marginBottom: 3, fontWeight: 600 }}>{r.name}</div>
-              <div style={{ fontSize: 11, color: T.textDim }}>{r.street && r.street + " · "}📍 {r.city || ""}{r.cuisine && " · " + r.cuisine}</div>
+
+        {!showManual ? (
+          <>
+            {/* Search input */}
+            <div style={{ position: "relative", marginBottom: 10 }}>
+              <input autoFocus value={q} onChange={handleChange} placeholder="Name, Küche oder Ort …"
+                style={{ width: "100%", boxSizing: "border-box", background: T.bgRaised, border: "1px solid " + T.borderHi, borderRadius: 10, padding: "12px 44px 12px 16px", color: T.text, fontSize: 14, fontFamily: "DM Sans, sans-serif", outline: "none" }}
+                onFocus={e => e.target.style.borderColor = T.gold} onBlur={e => e.target.style.borderColor = T.borderHi} />
+              <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>{loading ? "⏳" : "🔍"}</span>
             </div>
-          ))}
-          {q.length < 2 && <div style={{ textAlign: "center", color: T.textFade, padding: "40px 0", fontSize: 13 }}>Mindestens 2 Zeichen eingeben<br /><span style={{ fontSize: 32, display: "block", marginTop: 16 }}>🍽️</span></div>}
-        </div>
+            <div style={{ fontSize: 10, color: T.textFade, marginBottom: 10, letterSpacing: 1 }}>
+              {results.length ? results.length + " Treffer" : "mind. 2 Zeichen eingeben"}
+            </div>
+
+            {/* Results */}
+            <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+              {results.map(r => (
+                <div key={r.id} onClick={() => onSelect(r)}
+                  style={{ background: T.bgRaised, border: "1px solid " + T.border, borderRadius: 10, padding: "12px 16px", cursor: "pointer", transition: "all .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = T.gold; e.currentTarget.style.background = T.bgHover; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgRaised; }}>
+                  <div style={{ fontSize: 14, color: T.text, marginBottom: 3, fontWeight: 600 }}>{r.name}</div>
+                  <div style={{ fontSize: 11, color: T.textDim }}>{r.street && r.street + " · "}📍 {r.city || ""}{r.cuisine && " · " + r.cuisine}</div>
+                </div>
+              ))}
+
+              {/* Empty state */}
+              {q.length < 2 && <div style={{ textAlign: "center", color: T.textFade, padding: "40px 0", fontSize: 13 }}>Mindestens 2 Zeichen eingeben<br /><span style={{ fontSize: 32, display: "block", marginTop: 16 }}>🍽️</span></div>}
+
+              {/* No results → manual entry offer */}
+              {noResults && !loading && (
+                <div style={{ background: T.bgRaised, border: "1px solid " + T.border, borderRadius: 12, padding: "20px 18px", marginTop: 4, textAlign: "center" }}>
+                  <div style={{ fontSize: 24, marginBottom: 10 }}>🔍</div>
+                  <div style={{ fontSize: 13, color: T.textDim, marginBottom: 4 }}>„{q}" wurde nicht gefunden.</div>
+                  <div style={{ fontSize: 11, color: T.textFade, marginBottom: 16 }}>Das Restaurant ist möglicherweise nicht in OpenStreetMap eingetragen.</div>
+                  <button onClick={openManual}
+                    style={{ background: "linear-gradient(135deg,#a07828," + T.gold + ")", border: "none", borderRadius: 10, color: T.bg, padding: "11px 22px", fontSize: 13, fontWeight: 700, fontFamily: "DM Sans, sans-serif", cursor: "pointer", letterSpacing: 0.5 }}>
+                    ✏️ Manuell eintragen
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          /* Manual entry form */
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            <div style={{ fontSize: 11, color: T.textFade, marginBottom: 18, lineHeight: 1.6 }}>
+              Alle Felder sind Pflichtfelder. Die Daten werden nur lokal gespeichert.
+            </div>
+
+            <div style={{ fontSize: 10, letterSpacing: 2, color: T.textDim, textTransform: "uppercase", marginBottom: 6, fontFamily: "DM Sans, sans-serif" }}>Restaurantname</div>
+            <input value={manual.name} onChange={e => setManual(m => ({ ...m, name: e.target.value }))} placeholder="z.B. McDonald's Ludwigshafen"
+              style={fieldStyle} onFocus={e => e.target.style.borderColor = T.gold} onBlur={e => e.target.style.borderColor = T.border} />
+
+            <div style={{ fontSize: 10, letterSpacing: 2, color: T.textDim, textTransform: "uppercase", marginBottom: 6, fontFamily: "DM Sans, sans-serif" }}>Straße & Hausnummer</div>
+            <input value={manual.street} onChange={e => setManual(m => ({ ...m, street: e.target.value }))} placeholder="z.B. Bismarckstraße 12"
+              style={fieldStyle} onFocus={e => e.target.style.borderColor = T.gold} onBlur={e => e.target.style.borderColor = T.border} />
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ width: 100, flexShrink: 0 }}>
+                <div style={{ fontSize: 10, letterSpacing: 2, color: T.textDim, textTransform: "uppercase", marginBottom: 6, fontFamily: "DM Sans, sans-serif" }}>PLZ</div>
+                <input value={manual.plz} onChange={e => setManual(m => ({ ...m, plz: e.target.value }))} placeholder="67059"
+                  style={fieldStyle} onFocus={e => e.target.style.borderColor = T.gold} onBlur={e => e.target.style.borderColor = T.border} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, letterSpacing: 2, color: T.textDim, textTransform: "uppercase", marginBottom: 6, fontFamily: "DM Sans, sans-serif" }}>Ort</div>
+                <input value={manual.city} onChange={e => setManual(m => ({ ...m, city: e.target.value }))} placeholder="Ludwigshafen"
+                  style={fieldStyle} onFocus={e => e.target.style.borderColor = T.gold} onBlur={e => e.target.style.borderColor = T.border} />
+              </div>
+            </div>
+
+            <div style={{ fontSize: 10, letterSpacing: 2, color: T.textDim, textTransform: "uppercase", marginBottom: 6, fontFamily: "DM Sans, sans-serif" }}>Restauranttyp</div>
+            <select value={manual.cuisine} onChange={e => setManual(m => ({ ...m, cuisine: e.target.value }))}
+              style={{ ...fieldStyle, appearance: "none", backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%234a5a68' d='M6 8L0 0h12z'/%3E%3C/svg%3E\")", backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center", paddingRight: 36 }}>
+              <option value="">Bitte wählen …</option>
+              {CUISINE_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+
+            <div style={{ marginTop: 8 }}>
+              <GoldButton onClick={submitManual} disabled={!manualOk} fullWidth>
+                Restaurant übernehmen
+              </GoldButton>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
